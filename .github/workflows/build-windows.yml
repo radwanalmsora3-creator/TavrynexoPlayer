@@ -35,37 +35,32 @@ jobs:
         run: |
           $ProgressPreference = 'SilentlyContinue'
           [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          
+
           $vulkanVer = "1.3.296.0"
           $installer = "VulkanSDK-${vulkanVer}-Installer.exe"
           $downloadUrl = "https://sdk.lunarg.com/sdk/download/${vulkanVer}/windows/${installer}"
-          Write-Host "Downloading verified LunarG Vulkan SDK $vulkanVer from $downloadUrl..."
-          
+
           try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $installer -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -UseBasicParsing
           } catch {
-            Write-Warning "Primary download failed, switching to fallback 1.4.304.0..."
             $vulkanVer = "1.4.304.0"
             $installer = "VulkanSDK-${vulkanVer}-Installer.exe"
             $downloadUrl = "https://sdk.lunarg.com/sdk/download/${vulkanVer}/windows/${installer}"
             Invoke-WebRequest -Uri $downloadUrl -OutFile $installer -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -UseBasicParsing
           }
-          
-          Write-Host "Running silent installation..."
+
           Start-Process -FilePath ".\$installer" -ArgumentList "install", "--accept-licenses", "--default-answer", "--confirm-command" -Wait
           Remove-Item $installer -Force -ErrorAction SilentlyContinue
-          
+
           $sdkPath = "C:\VulkanSDK\$vulkanVer"
           if (Test-Path $sdkPath) {
-            Write-Host "Vulkan SDK verified at $sdkPath"
             "VULKAN_SDK=$sdkPath" | Out-File -FilePath $env:GITHUB_ENV -Append
             "$sdkPath\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
           } else {
-            $fallbackDir = Get-ChildItem "C:\VulkanSDK" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($fallbackDir) {
-              Write-Host "Vulkan SDK located at: $($fallbackDir.FullName)"
-              "VULKAN_SDK=$($fallbackDir.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-              "$($fallbackDir.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+            $found = Get-ChildItem "C:\VulkanSDK" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+              "VULKAN_SDK=$($found.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+              "$($found.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
             }
           }
 
@@ -74,9 +69,7 @@ jobs:
         run: |
           $ProgressPreference = 'SilentlyContinue'
           $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip"
-          Write-Host "Downloading FFmpeg shared build..."
           Invoke-WebRequest -Uri $url -OutFile "ffmpeg.zip" -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -UseBasicParsing
-          Write-Host "Extracting FFmpeg..."
           Expand-Archive -Path "ffmpeg.zip" -DestinationPath "$env:RUNNER_TEMP\ffmpeg_temp" -Force
           $extracted = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg_temp" -Directory | Select-Object -First 1
           Move-Item -Path $extracted.FullName -Destination "C:\ffmpeg"
@@ -87,10 +80,22 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+          if (Test-Path "TavrynexoPlayer\CMakeLists.txt") {
+            $srcDir = "TavrynexoPlayer"
+          } elseif (Test-Path "CMakeLists.txt") {
+            $srcDir = "."
+          } else {
+            Write-Error "CMakeLists.txt not found!"
+            exit 1
+          }
+          Write-Host "Using source directory: $srcDir"
+          "SRC_DIR=$srcDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          cmake -B build -S $srcDir -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR;C:\ffmpeg" `
-            -DFFMPEG_ROOT="C:\ffmpeg"
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR;C:\ffmpeg;$env:VULKAN_SDK" `
+            -DFFMPEG_ROOT="C:\ffmpeg" `
+            -DVulkan_ROOT="$env:VULKAN_SDK"
 
       - name: Build Tavrynexo Player
         shell: pwsh
@@ -101,16 +106,18 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "package/TavrynexoPlayer"
-          Copy-Item "build\Release\TavrynexoPlayer.exe" "package\TavrynexoPlayer\"
-          
-          # Deploy Qt 6 core, Gui, Quick, and QML engine
+          $exeItem = Get-ChildItem -Path "build" -Filter "TavrynexoPlayer.exe" -Recurse | Select-Object -First 1
+          if (-not $exeItem) {
+            Write-Error "TavrynexoPlayer.exe was not found in build directory!"
+            exit 1
+          }
+          Copy-Item $exeItem.FullName "package\TavrynexoPlayer\"
+
+          $qmlDir = Join-Path $env:SRC_DIR "qml"
           $windeployqt = "$env:QT_ROOT_DIR\bin\windeployqt.exe"
-          & $windeployqt --release --qmldir qml --compiler-runtime package\TavrynexoPlayer\TavrynexoPlayer.exe
-          
-          # Copy FFmpeg shared libraries
+          & $windeployqt --release --qmldir $qmlDir --compiler-runtime package\TavrynexoPlayer\TavrynexoPlayer.exe
+
           Copy-Item "C:\ffmpeg\bin\*.dll" "package\TavrynexoPlayer\" -Force
-          
-          # Create compressed standalone ZIP distribution
           Compress-Archive -Path "package\TavrynexoPlayer\*" -DestinationPath "TavrynexoPlayer-Windows-x64.zip" -CompressionLevel Optimal
 
       - name: Upload Artifact
