@@ -1,5 +1,8 @@
 #include "ui/MainWindow.hpp"
 #include "ui/Dialogs.hpp"
+#include <QComboBox>
+#include <QSpinBox>
+#include "ui/Dialogs.hpp"
 #include "ui/IconFactory.hpp"
 
 #include <QApplication>
