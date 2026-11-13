@@ -19,6 +19,12 @@ find_library(MPV_LIBRARY
 )
 
 add_executable(${PROJECT_NAME} WIN32
+    include/player/MpvVideoWidget.hpp
+    include/ui/IconFactory.hpp
+    include/ui/PlayerControls.hpp
+    include/ui/PlaylistWidget.hpp
+    include/ui/Dialogs.hpp
+    include/ui/MainWindow.hpp
     src/main.cpp
     src/player/MpvVideoWidget.cpp
     src/ui/IconFactory.cpp
