@@ -27,7 +27,10 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
 )
 
 # البحث عن مكتبات FFmpeg
-find_package(PkgConfig QUIET)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+if(NOT WIN32)
+    find_package(PkgConfig QUIET)
+endif()
 if(PKG_CONFIG_FOUND)
     pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
     pkg_check_modules(AVFORMAT REQUIRED IMPORTED_TARGET libavformat)
@@ -47,6 +50,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/core
     ${CMAKE_CURRENT_SOURCE_DIR}/include/vulkan
     ${Vulkan_INCLUDE_DIRS}
+    ${FFMPEG_INCLUDE_DIRS}
 )
 
 # ملفات المصدر (Sources & Headers)
@@ -102,6 +106,8 @@ if(PKG_CONFIG_FOUND)
         PkgConfig::SWSCALE
         PkgConfig::SWRESAMPLE
     )
+else()
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${FFMPEG_LIBRARIES})
 endif()
 
 # دعم مؤشرات الـ Threads والصوت لنظامي Linux و Windows
