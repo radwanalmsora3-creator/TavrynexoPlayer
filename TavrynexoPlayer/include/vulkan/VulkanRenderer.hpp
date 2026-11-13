@@ -1,10 +1,10 @@
 #pragma once
 
+#include <vulkan/vulkan.h>
 #include <QQuickItem>
 #include <QSGSimpleTextureNode>
 #include <QImage>
 #include <mutex>
-#include <vulkan/vulkan.h>
 
 namespace Tavrynexo::Vulkan {
 

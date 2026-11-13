@@ -87,7 +87,7 @@ QSGNode* VulkanRenderer::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
     }
 
     if (hasNew) {
-        QSGTexture* texture = window()->createTextureFromImage(frameToRender, QQuickWindow::CreateTexture_Alpha);
+        QSGTexture* texture = window()->createTextureFromImage(frameToRender, QQuickWindow::TextureHasAlphaChannel);
         node->setTexture(texture);
         node->setOwnsTexture(true);
     }

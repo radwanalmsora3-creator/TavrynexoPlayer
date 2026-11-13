@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #define MINIAUDIO_IMPLEMENTATION
 #include "core/AudioEngine.hpp"
 #include <algorithm>
@@ -78,7 +81,7 @@ void AudioEngine::dataCallback(ma_device* pDevice, void* pOutput, const void* /*
 
     std::lock_guard<std::mutex> lock(self->m_bufferMutex);
     size_t availableSamples = self->m_audioBuffer.size();
-    size_t samplesToRead = std::min(requestedSamples, availableSamples);
+    size_t samplesToRead = (std::min)(requestedSamples, availableSamples);
 
     float vol = self->m_isMuted.load() ? 0.0f : self->m_volume.load();
 
