@@ -29,7 +29,16 @@ bool VulkanRenderer::initVulkanContext() {
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pApplicationInfo = &appInfo;
 
-    if (vkCreateInstance(&createInfo, nullptr, &m_vkInstance) == VK_SUCCESS) {
+    m_vulkanLib.setFileName(QStringLiteral("vulkan-1"));
+    if (!m_vulkanLib.load()) {
+        std::cerr << "[Tavrynexo::Vulkan] vulkan-1.dll not found, using Qt SceneGraph RHI fallback" << std::endl;
+        m_vulkanReady = false;
+        return false;
+    }
+    auto pCreateInstance = reinterpret_cast<PFN_vkCreateInstance>(m_vulkanLib.resolve("vkCreateInstance"));
+    m_vkDestroyDevice = reinterpret_cast<PFN_vkDestroyDevice>(m_vulkanLib.resolve("vkDestroyDevice"));
+    m_vkDestroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(m_vulkanLib.resolve("vkDestroyInstance"));
+    if (pCreateInstance && pCreateInstance(&createInfo, nullptr, &m_vkInstance) == VK_SUCCESS) {
         m_vulkanReady = true;
     } else {
         std::cerr << "[Tavrynexo::Vulkan] Vulkan instance initialization fallback to Qt SceneGraph pipeline" << std::endl;
@@ -40,11 +49,11 @@ bool VulkanRenderer::initVulkanContext() {
 
 void VulkanRenderer::cleanupVulkan() {
     if (m_device != VK_NULL_HANDLE) {
-        vkDestroyDevice(m_device, nullptr);
+        if (m_vkDestroyDevice) m_vkDestroyDevice(m_device, nullptr);
         m_device = VK_NULL_HANDLE;
     }
     if (m_vkInstance != VK_NULL_HANDLE) {
-        vkDestroyInstance(m_vkInstance, nullptr);
+        if (m_vkDestroyInstance) m_vkDestroyInstance(m_vkInstance, nullptr);
         m_vkInstance = VK_NULL_HANDLE;
     }
 }

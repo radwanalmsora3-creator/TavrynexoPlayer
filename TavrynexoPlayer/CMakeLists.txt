@@ -95,7 +95,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Concurrent
-    Vulkan::Vulkan
 )
 
 if(PKG_CONFIG_FOUND)
