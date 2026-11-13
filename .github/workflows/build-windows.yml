@@ -2,15 +2,13 @@ name: Build Tavrynexo Player Windows
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build-windows:
-    name: Build Windows x64 Release
-    runs-on: windows-2022
+    name: Build Windows x64 Single-EXE
+    runs-on: windows-latest
 
     steps:
       - name: Checkout Code
@@ -18,8 +16,6 @@ jobs:
 
       - name: Setup MSVC Toolchain
         uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Install Qt 6.6.3
         uses: jurplel/install-qt-action@v4
@@ -30,99 +26,69 @@ jobs:
           arch: 'win64_msvc2019_64'
           cache: false
 
-      - name: Install Vulkan SDK
-        shell: pwsh
+      - name: Download & Prepare libmpv SDK
+        shell: powershell
         run: |
           $ProgressPreference = 'SilentlyContinue'
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-          $vulkanVer = "1.3.296.0"
-          $installer = "VulkanSDK-${vulkanVer}-Installer.exe"
-          $downloadUrl = "https://sdk.lunarg.com/sdk/download/${vulkanVer}/windows/${installer}"
-
-          try {
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $installer -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -UseBasicParsing
-          } catch {
-            $vulkanVer = "1.4.304.0"
-            $installer = "VulkanSDK-${vulkanVer}-Installer.exe"
-            $downloadUrl = "https://sdk.lunarg.com/sdk/download/${vulkanVer}/windows/${installer}"
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $installer -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -UseBasicParsing
-          }
-
-          Start-Process -FilePath ".\$installer" -ArgumentList "install", "--accept-licenses", "--default-answer", "--confirm-command" -Wait
-          Remove-Item $installer -Force -ErrorAction SilentlyContinue
-
-          $sdkPath = "C:\VulkanSDK\$vulkanVer"
-          if (Test-Path $sdkPath) {
-            "VULKAN_SDK=$sdkPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-            "$sdkPath\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-          } else {
-            $found = Get-ChildItem "C:\VulkanSDK" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) {
-              "VULKAN_SDK=$($found.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-              "$($found.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          New-Item -ItemType Directory -Force -Path "C:\libmpv", "C:\libmpv-sdk\include", "C:\libmpv-sdk\lib", "C:\libmpv-sdk\bin" | Out-Null
+          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" -Headers @{ "User-Agent" = "TavrynexoCI" }
+          $asset = $rel.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d+.*\.7z$' } | Select-Object -First 1
+          if (-not $asset) { throw "Could not find mpv-dev-x86_64 archive in latest release." }
+          Write-Host "Downloading $($asset.name)..."
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "C:\libmpv\mpv-dev.7z" -UserAgent "TavrynexoCI"
+          7z x "C:\libmpv\mpv-dev.7z" -o"C:\libmpv" -y | Out-Null
+          $dll = Get-ChildItem -Path "C:\libmpv" -Recurse -Filter "libmpv-2.dll" | Select-Object -First 1
+          $clientH = Get-ChildItem -Path "C:\libmpv" -Recurse -Filter "client.h" | Where-Object { $_.Directory.Name -eq "mpv" } | Select-Object -First 1
+          if (-not $dll -or -not $clientH) { throw "Invalid mpv-dev package structure." }
+          Copy-Item -Recurse -Force "$($clientH.Directory.Parent.FullName)\*" "C:\libmpv-sdk\include\"
+          Copy-Item -Force $dll.FullName "C:\libmpv-sdk\bin\libmpv-2.dll"
+          $exports = & dumpbin /exports $dll.FullName
+          $lines = @("LIBRARY libmpv-2.dll", "EXPORTS")
+          $cap = $false
+          foreach ($l in $exports) {
+            if ($l -match "ordinal\s+hint\s+RVA\s+name") { $cap = $true; continue }
+            if ($l -match "^\s*Summary") { break }
+            if ($cap) {
+              $p = $l.Trim() -split '\s+'
+              if ($p.Count -ge 4 -and $p[3] -and $p[3] -ne "=") { $lines += $p[3] }
             }
           }
+          Set-Content -Path "C:\libmpv-sdk\lib\mpv.def" -Value $lines -Encoding ASCII
+          & lib.exe /def:"C:\libmpv-sdk\lib\mpv.def" /machine:x64 /out:"C:\libmpv-sdk\lib\libmpv-2.lib"
+          if (-not (Test-Path "C:\libmpv-sdk\lib\libmpv-2.lib")) { throw "lib.exe failed to build libmpv-2.lib" }
 
-      - name: Download & Extract FFmpeg Shared
-        shell: pwsh
+      - name: Configure & Build Tavrynexo Player
+        shell: powershell
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip"
-          Invoke-WebRequest -Uri $url -OutFile "ffmpeg.zip" -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -UseBasicParsing
-          Expand-Archive -Path "ffmpeg.zip" -DestinationPath "$env:RUNNER_TEMP\ffmpeg_temp" -Force
-          $extracted = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg_temp" -Directory | Select-Object -First 1
-          Move-Item -Path $extracted.FullName -Destination "C:\ffmpeg"
-          "FFMPEG_DIR=C:\ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "C:\ffmpeg\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-          Remove-Item "ffmpeg.zip" -Force -ErrorAction SilentlyContinue
-
-      - name: Configure CMake
-        shell: pwsh
-        run: |
-          if (Test-Path "TavrynexoPlayer\CMakeLists.txt") {
-            $srcDir = "TavrynexoPlayer"
-          } elseif (Test-Path "CMakeLists.txt") {
-            $srcDir = "."
-          } else {
-            Write-Error "CMakeLists.txt not found!"
-            exit 1
-          }
-          Write-Host "Using source directory: $srcDir"
-          "SRC_DIR=$srcDir" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-          cmake -B build -S $srcDir -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR;C:\ffmpeg;$env:VULKAN_SDK" `
-            -DFFMPEG_ROOT="C:\ffmpeg" `
-            -DVulkan_ROOT="$env:VULKAN_SDK"
-
-      - name: Build Tavrynexo Player
-        shell: pwsh
-        run: |
+          cmake -S TavrynexoPlayer -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_PREFIX_PATH="$env:Qt6_DIR" `
+            -DMPV_ROOT="C:/libmpv-sdk"
           cmake --build build --config Release --parallel
 
-      - name: Package with windeployqt & FFmpeg DLLs
-        shell: pwsh
+      - name: Deploy & Pack Single EXE
+        shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path "package/TavrynexoPlayer"
-          $exeItem = Get-ChildItem -Path "build" -Filter "TavrynexoPlayer.exe" -Recurse | Select-Object -First 1
-          if (-not $exeItem) {
-            Write-Error "TavrynexoPlayer.exe was not found in build directory!"
-            exit 1
-          }
-          Copy-Item $exeItem.FullName "package\TavrynexoPlayer\"
-
-          $qmlDir = Join-Path $env:SRC_DIR "qml"
-          $windeployqt = "$env:QT_ROOT_DIR\bin\windeployqt.exe"
-          & $windeployqt --release --qmldir $qmlDir --compiler-runtime package\TavrynexoPlayer\TavrynexoPlayer.exe
-
-          Copy-Item "C:\ffmpeg\bin\*.dll" "package\TavrynexoPlayer\" -Force
-          Compress-Archive -Path "package\TavrynexoPlayer\*" -DestinationPath "TavrynexoPlayer-Windows-x64.zip" -CompressionLevel Optimal
+          $ProgressPreference = 'SilentlyContinue'
+          New-Item -ItemType Directory -Force -Path "dist", "stage", "out" | Out-Null
+          Copy-Item "build\Release\TavrynexoPlayer.exe" "dist\TavrynexoPlayer.exe"
+          Copy-Item "C:\libmpv-sdk\bin\libmpv-2.dll" "dist\libmpv-2.dll"
+          & "$env:Qt6_DIR\bin\windeployqt.exe" --release --no-translations --no-compiler-runtime "dist\TavrynexoPlayer.exe"
+          $crtDir = Get-ChildItem -Path "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          if ($crtDir) { Copy-Item "$($crtDir.FullName)\*.dll" "dist\" -Force }
+          Move-Item "dist\TavrynexoPlayer.exe" "stage\TavrynexoPlayer.exe" -Force
+          Invoke-WebRequest -Uri "https://www.enigmaprotector.com/assets/files/enigmavb.exe" -OutFile "enigmavb.exe" -UserAgent "TavrynexoCI"
+          Start-Process -FilePath ".\enigmavb.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          npm install -g generate-evb
+          node -e "const g=require('generate-evb'),p=require('path'); g(p.resolve('pack.evb'), p.resolve('stage/TavrynexoPlayer.exe'), p.resolve('out/TavrynexoPlayer.exe'), p.resolve('dist'));"
+          $evbCli = "${env:ProgramFiles(x86)}\Enigma Virtual Box\enigmavbconsole.exe"
+          if (-not (Test-Path $evbCli)) { $evbCli = "${env:ProgramFiles}\Enigma Virtual Box\enigmavbconsole.exe" }
+          if (-not (Test-Path $evbCli)) { throw "enigmavbconsole.exe not found" }
+          & $evbCli (Resolve-Path "pack.evb").Path
+          if (-not (Test-Path "out\TavrynexoPlayer.exe")) { throw "Single-EXE build failed." }
+          Get-Item "out\TavrynexoPlayer.exe" | Select-Object Name, Length
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: TavrynexoPlayer-Windows-x64
-          path: TavrynexoPlayer-Windows-x64.zip
-          retention-days: 14
+          path: out/TavrynexoPlayer.exe
