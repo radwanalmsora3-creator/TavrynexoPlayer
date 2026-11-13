@@ -61,7 +61,7 @@ jobs:
         shell: powershell
         run: |
           cmake -S TavrynexoPlayer -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="$env:Qt6_DIR" `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
             -DMPV_ROOT="C:/libmpv-sdk"
           cmake --build build --parallel
 
@@ -72,8 +72,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist", "stage", "out" | Out-Null
           Copy-Item "build\TavrynexoPlayer.exe" "dist\TavrynexoPlayer.exe"
           Copy-Item "C:\libmpv-sdk\bin\libmpv-2.dll" "dist\libmpv-2.dll"
-          & "$env:Qt6_DIR\bin\windeployqt.exe" --release --no-translations --no-compiler-runtime "dist\TavrynexoPlayer.exe"
-          $crtDir = Get-ChildItem -Path "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          $windeploy = if (Get-Command windeployqt.exe -ErrorAction SilentlyContinue) { "windeployqt.exe" } else { "$env:QT_ROOT_DIR\bin\windeployqt.exe" }
+          & $windeploy --release --no-translations --no-compiler-runtime "dist\TavrynexoPlayer.exe"
+          $crtDir = if ($env:VCToolsRedistDir -and (Test-Path "$env:VCToolsRedistDir\x64")) { Get-ChildItem -Path "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1 } else { $null }
           if ($crtDir) { Copy-Item "$($crtDir.FullName)\*.dll" "dist\" -Force }
           Move-Item "dist\TavrynexoPlayer.exe" "stage\TavrynexoPlayer.exe" -Force
           Invoke-WebRequest -Uri "https://www.enigmaprotector.com/assets/files/enigmavb.exe" -OutFile "enigmavb.exe" -UserAgent "TavrynexoCI"
