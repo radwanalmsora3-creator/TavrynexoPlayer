@@ -79,7 +79,9 @@ jobs:
           Move-Item "dist\TavrynexoPlayer.exe" "stage\TavrynexoPlayer.exe" -Force
           Invoke-WebRequest -Uri "https://www.enigmaprotector.com/assets/files/enigmavb.exe" -OutFile "enigmavb.exe" -UserAgent "TavrynexoCI"
           Start-Process -FilePath ".\enigmavb.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
-          npm install -g generate-evb
+          New-Item -ItemType Directory -Force -Path "C:\evb-gen" | Out-Null
+          npm install --prefix "C:\evb-gen" generate-evb
+          $env:NODE_PATH = "C:\evb-gen\node_modules"
           node -e "const g=require('generate-evb'),p=require('path'); g(p.resolve('pack.evb'), p.resolve('stage/TavrynexoPlayer.exe'), p.resolve('out/TavrynexoPlayer.exe'), p.resolve('dist'));"
           $evbCli = "${env:ProgramFiles(x86)}\Enigma Virtual Box\enigmavbconsole.exe"
           if (-not (Test-Path $evbCli)) { $evbCli = "${env:ProgramFiles}\Enigma Virtual Box\enigmavbconsole.exe" }
